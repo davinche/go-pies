@@ -9,7 +9,8 @@ import (
 )
 
 type config struct {
-	Redis string `json:"redis"`
+	Redis         string `json:"redishost"`
+	RedisPassword string `json:"redispass"`
 }
 
 // Config contains configuration to run the app
@@ -29,5 +30,9 @@ func init() {
 	err = json.Unmarshal(data, &Config)
 	if err != nil {
 		log.Fatalf("error: could not parse config")
+	}
+
+	if Config.Redis == "" {
+		Config.Redis = ":6379"
 	}
 }

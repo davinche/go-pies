@@ -22,7 +22,11 @@ var pool *redis.Pool
 func init() {
 	pool = &redis.Pool{
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", config.Config.Redis)
+			redisOpts := []redis.DialOption{}
+			if config.Config.RedisPassword != "" {
+				redisOpts = append(redisOpts, redis.DialPassword(config.Config.RedisPassword))
+			}
+			c, err := redis.Dial("tcp", config.Config.Redis, redisOpts...)
 			if err != nil {
 				log.Fatalf("error: could not create redis connection pool: err=%q\n", err)
 			}

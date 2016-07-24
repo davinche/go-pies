@@ -29,9 +29,7 @@ func FromURL(url string) {
 // FromFile ingests data from the pies.json file from disk.
 // Pies.json was obtained from the link in the bakeoff.
 func FromFile() {
-
 	execDir, err := osext.ExecutableFolder()
-
 	if err != nil {
 		log.Fatalf("error: could not determine path for pies.json: err=%q\n", err)
 	}
@@ -59,8 +57,13 @@ func ingest(r io.ReadCloser) {
 		log.Fatalf("error: could not decode pies.json: err=%q\n", err)
 	}
 
+	redisOpts := []redis.DialOption{}
+	if config.Config.RedisPassword != "" {
+		redisOpts = append(redisOpts, redis.DialPassword(config.Config.RedisPassword))
+	}
+
 	// Connect to redis
-	conn, err := redis.Dial("tcp", config.Config.Redis)
+	conn, err := redis.Dial("tcp", config.Config.Redis, redisOpts...)
 	if err != nil {
 		log.Fatalf("error: could not connect to redis: err=%q\n", err)
 	}
