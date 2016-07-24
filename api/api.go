@@ -5,12 +5,23 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/davinche/gpies/pie"
 	"github.com/dimfeld/httptreemux"
 	"github.com/garyburd/redigo/redis"
 )
+
+// PiesAvailableKey is the key representing the set of available pies left to purchase
+const PiesAvailableKey = "pies:available"
+
+// PiesJSONKey is the key representing the set of all pies in json format
+const PiesJSONKey = "pies:json"
+
+// PiesTotalKey is the key representing the set of all pies
+const PiesTotalKey = "pies:total"
 
 // PieKey is the formatted string that represents the key to get a specific pie's
 // JSON stringified representation
@@ -38,9 +49,6 @@ const PurchaseKey = "pie:%s:user:%s"
 // UserAvailableKey is the formatted string that represents the key to the
 // number of remaining pies available to the user
 const UserAvailableKey = "user:%s:available"
-
-// PiesAvailable is the key representing the set of available pies left to purchase
-const PiesAvailable = "piesavailable"
 
 // Redis Connection Pool
 var pool *redis.Pool
@@ -109,33 +117,43 @@ func Handle(prefix string, r *httptreemux.TreeMux) {
 	api := r.NewGroup(prefix)
 	api.GET("/pies", getPies)
 	api.GET("/pies/:id", getPie)
-	api.GET("/pies/recommended", getRecommended)
+	api.GET("/pies/recommend", getRecommended)
 	api.POST("/pies/:id/purchases", purchasePie)
 }
 
 // getPies returns the list of all pies
 func getPies(w http.ResponseWriter, r *http.Request, _ map[string]string) {
-	// Stub out pies for now
-	p := []*pie.Pie{
-		&pie.Pie{
-			ID:       1,
-			Name:     "Apple Pie",
-			ImageURL: "Some URL",
-			Price:    1.25,
-			Slices:   5,
-			Labels:   []string{"apple", "pie"},
-		},
+	conn := pool.Get()
 
-		&pie.Pie{
-			ID:       2,
-			Name:     "Pumpkin Pie",
-			ImageURL: "Some URL",
-			Price:    1.50,
-			Slices:   3,
-			Labels:   []string{"pumpkin", "pie"},
-		},
+	// Get all the pies
+	piesBytes, err := redis.Bytes(conn.Do("GET", PiesJSONKey))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("error: could not get pies from Redis: err=%q\n", err)
+		return
 	}
-	encodeJSON(w, p, nil)
+
+	// Unmarshall
+	pies := pie.Pies{}
+	err = json.Unmarshal(piesBytes, &pies)
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("error: could not unmarshall pies: err=%q\n", err)
+		return
+	}
+
+	for _, p := range pies.Pies {
+		slicesKey := fmt.Sprintf(PieSlicesKey, strconv.FormatUint(p.ID, 10))
+		slices, err := redis.Int(conn.Do("GET", slicesKey))
+		if err != nil {
+			log.Printf("error: could not get pie slices: err=%q\n", err)
+			return
+		}
+		p.Slices = slices
+	}
+
+	encodeJSON(w, pies.Pies, nil)
 }
 
 // getPie returns the information for a single pie
@@ -185,7 +203,7 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 		return
 	}
 
-	// TODO: get purchases
+	// get purchases
 	members, err := redis.Values(resp[2], nil)
 	if err != nil {
 		fmt.Println("FK")
@@ -219,6 +237,100 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 
 // getRecommended gets a recommended pie for a given user
 func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	// username (String):  Identifier of a unique pie eater.
+	// budget (String) - Either:
+	// “cheap” - returns the cheapest available slice of pie that meets any other criteria
+	// “premium” - returns the priciest available slice of pie that meets any other criteria
+	// labels (String) - Selects only pies
+	conn := pool.Get()
+	username := r.FormValue("username")
+	budget := r.FormValue("budget")
+	labelsStr := r.FormValue("labels")
+	var labels []string
+	if labelsStr != "" {
+		labels = strings.Split(labelsStr, ",")
+	}
+
+	log.Printf("debug: username=%q, budget=%q, labels=%q\n", username, budget, labelsStr)
+
+	// List of sets we are going to intersect with to narrow down the pies
+	// we can recommend to the user
+	query := []interface{}{
+		PiesAvailableKey,
+	}
+
+	// List of sets that we are going to query to get the narrowed list of
+	// pies to recommmend
+
+	// Check to see if there is a list of pies available to a user
+	userAvailableKey := fmt.Sprintf(UserAvailableKey, username)
+	exists, err := redis.Bool(conn.Do("EXISTS", userAvailableKey))
+	if err != nil {
+		redisError(w, err)
+		return
+	}
+
+	// Create the list of sets that we will query against to figure out which
+	// pie to recommend
+	log.Printf("debug: userAvailableKey=%v\n", userAvailableKey)
+	if exists {
+		query = append(query, userAvailableKey)
+	}
+
+	// Figure out which labels to filter by
+	if len(labels) > 0 {
+		for _, label := range labels {
+			query = append(query, fmt.Sprintf(LabelKey, label))
+		}
+	}
+
+	log.Printf("debug: query=%v\n", query)
+
+	// Query redis for the intersecting pies
+	recommendedPieIDs, err := redis.Values(conn.Do("SINTER", query...))
+	if err != nil {
+		redisError(w, err)
+		return
+	}
+
+	// Are there any pies to recommend
+	if len(recommendedPieIDs) == 0 {
+		noRecommended(w)
+		return
+	}
+
+	// Get all the pies to recommend
+	listOfPies := pie.BudgetPies{}
+
+	// Get the pie details
+	for _, id := range recommendedPieIDs {
+		pKey := fmt.Sprintf(PieKey, id)
+		pBytes, err := redis.Bytes(conn.Do("GET", pKey))
+		if err != nil {
+			redisError(w, err)
+			return
+		}
+
+		pieObj := pie.Pie{}
+		err = json.Unmarshal(pBytes, &pieObj)
+		if err != nil {
+			errMsg := fmt.Sprintf("error: could not unmarshal json: err=%q", err)
+			log.Println(errMsg)
+			encodeError(w, errMsg)
+			return
+		}
+
+		listOfPies = append(listOfPies, &pieObj)
+	}
+
+	// Sort by budget
+	if budget == "cheap" {
+		sort.Sort(listOfPies)
+	} else {
+		sort.Sort(sort.Reverse(listOfPies))
+	}
+
+	recommend(w, r, listOfPies[0])
 }
 
 // getPurchaseParams validates an incoming request and ensures that all
@@ -364,7 +476,7 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 	var transactionError error
 	for i := 0; i < 5; i++ {
 		// TODO: sleep maybe for exponential backoff?
-		_, err := conn.Do("WATCH", slicesKey, piePurchasersKey, purchasesKey, UserAvailableKey, PiesAvailable)
+		_, err := conn.Do("WATCH", slicesKey, piePurchasersKey, purchasesKey, UserAvailableKey, PiesAvailableKey)
 		if err != nil {
 			transactionError = err
 			continue
@@ -379,7 +491,7 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 		if !existingUser {
 			// grab all available pies
-			_, err := conn.Do("SDIFFSTORE", userAvailableKey, PiesAvailable)
+			_, err := conn.Do("SDIFFSTORE", userAvailableKey, PiesAvailableKey)
 			if err != nil {
 				transactionError = err
 				continue
@@ -430,7 +542,7 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 		// Check to see if the pie is still available?
 		if (remainingSlices - wantedSlices) == 0 {
-			conn.Send("SREM", PiesAvailable, pieID)
+			conn.Send("SREM", PiesAvailableKey, pieID)
 		}
 
 		// Check to see if the user can still buy more
@@ -483,5 +595,21 @@ func wrongMaths(w http.ResponseWriter) {
 	encoder := json.NewEncoder(w)
 	err := errorResponse{"You did math wrong."}
 	w.WriteHeader(http.StatusPaymentRequired)
+	encoder.Encode(err)
+}
+
+func recommend(w http.ResponseWriter, r *http.Request, p *pie.Pie) {
+	encoder := json.NewEncoder(w)
+	resp := struct {
+		PieURL string `json:"pie_url"`
+	}{"http://" + r.Host + "/api/pies/" + strconv.FormatUint(p.ID, 10)}
+	encoder.Encode(resp)
+}
+
+// noReommended pies for you sir
+func noRecommended(w http.ResponseWriter) {
+	encoder := json.NewEncoder(w)
+	err := errorResponse{"Sorry we don’t have what you’re looking for.  Come back early tomorrow before the crowds come from the best pie selection."}
+	w.WriteHeader(http.StatusNotFound)
 	encoder.Encode(err)
 }

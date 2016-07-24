@@ -66,6 +66,20 @@ func ingest(r io.ReadCloser) {
 
 // createPies creates a hash entry for each
 func createPies(conn redis.Conn, pies []*pie.Pie) error {
+
+	allPies := pie.Pies{Pies: pies}
+
+	// Serialize all the pies as json
+	piesSerialized, err := json.Marshal(&allPies)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Do("SET", api.PiesJSONKey, piesSerialized)
+	if err != nil {
+		return err
+	}
+
+	// Go through each pie and set the approriate pie information / indexes
 	for _, p := range pies {
 
 		pieIDString := strconv.FormatUint(p.ID, 10)
@@ -83,7 +97,8 @@ func createPies(conn redis.Conn, pies []*pie.Pie) error {
 		conn.Send("MULTI")
 		conn.Send("SET", key, serialized)
 		conn.Send("SET", slicesKey, p.Slices)
-		conn.Send("SADD", api.PiesAvailable, pieIDString)
+		conn.Send("SADD", api.PiesAvailableKey, pieIDString)
+		conn.Send("SADD", api.PiesTotalKey, pieIDString)
 
 		// Set the labels
 		for _, l := range p.Labels {

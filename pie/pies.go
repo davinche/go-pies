@@ -10,6 +10,26 @@ type Pie struct {
 	Labels   []string `json:"labels"`
 }
 
+// Pies contains a list of pies
+type Pies struct {
+	Pies []*Pie `json:"pies"`
+}
+
+// BudgetPies is useed to sort pies by budget
+type BudgetPies []*Pie
+
+func (b BudgetPies) Len() int {
+	return len(b)
+}
+
+func (b BudgetPies) Less(i, j int) bool {
+	return b[i].Price < b[j].Price
+}
+
+func (b BudgetPies) Swap(i, j int) {
+	b[i], b[j] = b[j], b[i]
+}
+
 // Purchases contains information about a particualar user as well as
 // the number of slices that user purchased for a specific pie
 type Purchases struct {
