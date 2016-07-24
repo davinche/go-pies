@@ -195,9 +195,6 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 		PiesAvailableKey,
 	}
 
-	// List of sets that we are going to query to get the narrowed list of
-	// pies to recommmend
-
 	// Check to see if there is a list of pies available to a user
 	userAvailableKey := fmt.Sprintf(UserAvailableKey, username)
 	exists, err := redis.Bool(conn.Do("EXISTS", userAvailableKey))
@@ -206,8 +203,7 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 		return
 	}
 
-	// Create the list of sets that we will query against to figure out which
-	// pie to recommend
+	// Filter by pies available to current user if possible
 	log.Printf("debug: userAvailableKey=%v\n", userAvailableKey)
 	if exists {
 		query = append(query, userAvailableKey)
