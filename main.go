@@ -12,6 +12,6 @@ import (
 func main() {
 	ingest.FromFile()
 	router := httptreemux.New()
-	api.Handle("/api", router)
+	api.Handle("/", router)
 	log.Fatal(http.ListenAndServe(":31415", router))
 }

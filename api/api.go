@@ -14,45 +14,10 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-// PiesAvailableKey is the key representing the set of available pies left to purchase
-const PiesAvailableKey = "pies:available"
-
-// PiesJSONKey is the key representing the set of all pies in json format
-const PiesJSONKey = "pies:json"
-
-// PiesTotalKey is the key representing the set of all pies
-const PiesTotalKey = "pies:total"
-
-// PieKey is the formatted string that represents the key to get a specific pie's
-// JSON stringified representation
-const PieKey string = "pie:%s"
-
-// HPieKey is the formatted string that represents the key to get a specific pie and it's fields
-const HPieKey string = "hpie:%s"
-
-// PieSlicesKey is the formatted string that represents the key to get the number
-// of slices for a specific pie
-const PieSlicesKey = "pie:%s:slices"
-
-// PiePurchasersKey is the formatted string that represents the number of users
-// who has purchased a specific pie
-const PiePurchasersKey = "pie:%s:purchasers"
-
-// LabelKey is the formatted string that represents a label. This key points to a
-// set of all Pies that are under that label
-const LabelKey = "label:%s"
-
-// PurchaseKey is the formatted string that represents the purchases
-// by a specific user for a specific Pie.
-const PurchaseKey = "pie:%s:user:%s"
-
-// UserAvailableKey is the formatted string that represents the key to the
-// number of remaining pies available to the user
-const UserAvailableKey = "user:%s:available"
-
 // Redis Connection Pool
 var pool *redis.Pool
 
+// Create a redis pool connection on API init
 func init() {
 	pool = &redis.Pool{
 		Dial: func() (redis.Conn, error) {
@@ -63,52 +28,6 @@ func init() {
 			return c, err
 		},
 	}
-}
-
-type errorResponse struct {
-	Error string `json:"error"`
-}
-
-type errorsResponse struct {
-	Errors []string `json:"errors"`
-}
-
-// encodeJSON is a helper that creates a new json encoder
-// and serializes the data and writes it out to the response.
-func encodeJSON(w http.ResponseWriter, data interface{}, statusCode interface{}) {
-	code := http.StatusOK
-	if statusCode != nil {
-		code = statusCode.(int)
-	}
-	w.WriteHeader(code)
-	encoder := json.NewEncoder(w)
-	encoder.Encode(data)
-}
-
-// encodeError is a helper that takes an array of error messages and
-// serializes into an errors JSON response while setting the http status code
-// to 500 (internal status errorr)
-func encodeError(w http.ResponseWriter, msg string) {
-	w.WriteHeader(http.StatusInternalServerError)
-	errors := errorsResponse{[]string{msg}}
-	encoder := json.NewEncoder(w)
-	encoder.Encode(errors)
-}
-
-// encodeBadRequest is a helper function that takes in an array of error
-// messages and returns a BadRequest response with the list of errors
-func encodeBadRequest(w http.ResponseWriter, msgs ...string) {
-	w.WriteHeader(http.StatusBadRequest)
-	errors := errorsResponse{msgs}
-	encoder := json.NewEncoder(w)
-	encoder.Encode(errors)
-}
-
-// redisError is a helper function that reports all redis errors
-func redisError(w http.ResponseWriter, e error) {
-	errMsg := fmt.Sprintf("error: redis connection error: err=%q\n", e)
-	log.Println(errMsg)
-	encodeError(w, errMsg)
 }
 
 // Handle takes a prefix (the prefix route for the API) and registers
@@ -143,17 +62,20 @@ func getPies(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		return
 	}
 
-	for _, p := range pies.Pies {
+	for _, p := range pies {
+		// Grab remainig slices for the pie
 		slicesKey := fmt.Sprintf(PieSlicesKey, strconv.FormatUint(p.ID, 10))
 		slices, err := redis.Int(conn.Do("GET", slicesKey))
 		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("error: could not get pie slices: err=%q\n", err)
 			return
 		}
 		p.Slices = slices
+		p.Permalink = "http://" + r.Host + "/pies/" + strconv.FormatUint(p.ID, 10)
 	}
 
-	encodeJSON(w, pies.Pies, nil)
+	PiesList.Execute(w, pies)
 }
 
 // getPie returns the information for a single pie
@@ -166,6 +88,7 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	key := fmt.Sprintf(PieKey, pieID)
 	slicesKey := fmt.Sprintf(PieSlicesKey, pieID)
 	piePurchasersKey := fmt.Sprintf(PiePurchasersKey, pieID)
+	log.Printf("debug: pieKey=%q, slicesKey=%q, purchasersKey=%q\n", key, slicesKey, piePurchasersKey)
 
 	// Pie to eventually serialize
 	p := pie.Pie{}
@@ -184,13 +107,15 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 		return
 	}
 
-	pieString, err := redis.String(resp[0], nil)
+	// Get the pie data from redis
+	pieBytes, err := redis.Bytes(resp[0], nil)
 	if err != nil {
 		redisError(w, err)
 		return
 	}
 
-	err = json.Unmarshal([]byte(pieString), &p)
+	// Unmarshall into pie object
+	err = json.Unmarshal(pieBytes, &p)
 	if err != nil {
 		redisError(w, err)
 		return
@@ -203,14 +128,14 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 		return
 	}
 
-	// get purchases
+	// get purchaser IDs
 	members, err := redis.Values(resp[2], nil)
 	if err != nil {
-		fmt.Println("FK")
 		redisError(w, err)
 		return
 	}
 
+	// Get number of slices by each purchaser
 	for _, member := range members {
 		memberName, err := redis.String(member, nil)
 		if err != nil {
@@ -232,20 +157,19 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	// serializes
 	p.Slices = 0
 	details.RemainingSlices = slices
-	encodeJSON(w, details, nil)
+	PiesSingle.Execute(w, details)
 }
 
 // getRecommended gets a recommended pie for a given user
 func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string) {
-	// username (String):  Identifier of a unique pie eater.
-	// budget (String) - Either:
-	// “cheap” - returns the cheapest available slice of pie that meets any other criteria
-	// “premium” - returns the priciest available slice of pie that meets any other criteria
-	// labels (String) - Selects only pies
 	conn := pool.Get()
+
+	// Get the from data
 	username := r.FormValue("username")
 	budget := r.FormValue("budget")
 	labelsStr := r.FormValue("labels")
+
+	// Split labels by delimiter ","
 	var labels []string
 	if labelsStr != "" {
 		labels = strings.Split(labelsStr, ",")
@@ -300,7 +224,7 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 	}
 
 	// Get all the pies to recommend
-	listOfPies := pie.BudgetPies{}
+	listOfPies := pie.Pies{}
 
 	// Get the pie details
 	for _, id := range recommendedPieIDs {
@@ -602,7 +526,7 @@ func recommend(w http.ResponseWriter, r *http.Request, p *pie.Pie) {
 	encoder := json.NewEncoder(w)
 	resp := struct {
 		PieURL string `json:"pie_url"`
-	}{"http://" + r.Host + "/api/pies/" + strconv.FormatUint(p.ID, 10)}
+	}{"http://" + r.Host + "/pies/" + strconv.FormatUint(p.ID, 10)}
 	encoder.Encode(resp)
 }
 
@@ -612,4 +536,54 @@ func noRecommended(w http.ResponseWriter) {
 	err := errorResponse{"Sorry we don’t have what you’re looking for.  Come back early tomorrow before the crowds come from the best pie selection."}
 	w.WriteHeader(http.StatusNotFound)
 	encoder.Encode(err)
+}
+
+// ----------------------------------------------------------------------------
+// API Response Helpers
+// ----------------------------------------------------------------------------
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+type errorsResponse struct {
+	Errors []string `json:"errors"`
+}
+
+// encodeJSON is a helper that creates a new json encoder
+// and serializes the data and writes it out to the response.
+func encodeJSON(w http.ResponseWriter, data interface{}, statusCode interface{}) {
+	code := http.StatusOK
+	if statusCode != nil {
+		code = statusCode.(int)
+	}
+	w.WriteHeader(code)
+	encoder := json.NewEncoder(w)
+	encoder.Encode(data)
+}
+
+// encodeError is a helper that takes an array of error messages and
+// serializes into an errors JSON response while setting the http status code
+// to 500 (internal status errorr)
+func encodeError(w http.ResponseWriter, msg string) {
+	w.WriteHeader(http.StatusInternalServerError)
+	errors := errorsResponse{[]string{msg}}
+	encoder := json.NewEncoder(w)
+	encoder.Encode(errors)
+}
+
+// encodeBadRequest is a helper function that takes in an array of error
+// messages and returns a BadRequest response with the list of errors
+func encodeBadRequest(w http.ResponseWriter, msgs ...string) {
+	w.WriteHeader(http.StatusBadRequest)
+	errors := errorsResponse{msgs}
+	encoder := json.NewEncoder(w)
+	encoder.Encode(errors)
+}
+
+// redisError is a helper function that reports all redis errors
+func redisError(w http.ResponseWriter, e error) {
+	errMsg := fmt.Sprintf("error: redis connection error: err=%q\n", e)
+	log.Println(errMsg)
+	encodeError(w, errMsg)
 }

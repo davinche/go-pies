@@ -42,7 +42,7 @@ func ingest(r io.ReadCloser) {
 
 	// Create the pie struct to deserialize into
 	pStruct := struct {
-		Pies []*pie.Pie `json:"pies"`
+		Pies pie.Pies `json:"pies"`
 	}{}
 
 	decoder := json.NewDecoder(r)
@@ -65,12 +65,10 @@ func ingest(r io.ReadCloser) {
 }
 
 // createPies creates a hash entry for each
-func createPies(conn redis.Conn, pies []*pie.Pie) error {
-
-	allPies := pie.Pies{Pies: pies}
+func createPies(conn redis.Conn, pies pie.Pies) error {
 
 	// Serialize all the pies as json
-	piesSerialized, err := json.Marshal(&allPies)
+	piesSerialized, err := json.Marshal(pies)
 	if err != nil {
 		return err
 	}
