@@ -1,0 +1,28 @@
+{
+  "pies": [
+    {
+      "id": 1,
+      "name": "Apple Pie",
+      "image_url": "http://stash.truex.com/tech/bakeoff/apple_pie.jpg",
+      "price_per_slice": 1.50,
+      "slices": 10,
+      "labels": ["vegetarian", "vegan", "sweet"]
+    },
+    {
+      "id": 2,
+      "name": "Pecan Pie",
+      "image_url": "http://stash.truex.com/tech/bakeoff/pecan_pie.jpg",
+      "price_per_slice": 2.25,
+      "slices": 14,
+      "labels": ["vegetarian", "vegan", "sweet"]
+    },
+    {
+      "id": 3,
+      "name": "Shepherd's Pie",
+      "image_url": "http://stash.truex.com/tech/bakeoff/shepherds_pie.jpg",
+      "price_per_slice": 8.95,
+      "slices": 8,
+      "labels": ["gluten_free", "savory"]
+    }
+  ]
+}
