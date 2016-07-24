@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/davinche/gpies/config"
 	"github.com/davinche/gpies/pie"
 	"github.com/dimfeld/httptreemux"
 	"github.com/garyburd/redigo/redis"
@@ -21,7 +22,7 @@ var pool *redis.Pool
 func init() {
 	pool = &redis.Pool{
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", ":6379")
+			c, err := redis.Dial("tcp", config.Config.Redis)
 			if err != nil {
 				log.Fatalf("error: could not create redis connection pool: err=%q\n", err)
 			}
@@ -83,6 +84,11 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	conn := pool.Get()
 	defer conn.Close()
 	pieID := params["id"]
+	isJSON := false
+	if strings.HasSuffix(pieID, ".json") {
+		isJSON = true
+		pieID = pieID[:strings.LastIndex(pieID, ".")]
+	}
 
 	// Redis Keys that we need
 	key := fmt.Sprintf(PieKey, pieID)
@@ -157,6 +163,12 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	// serializes
 	p.Slices = 0
 	details.RemainingSlices = slices
+
+	// showing json? Or rendering template
+	if isJSON {
+		encodeJSON(w, details, nil)
+		return
+	}
 	PiesSingle.Execute(w, details)
 }
 
@@ -331,6 +343,7 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 	// Simple check for gluttony if slices > 3
 	if wantedSlices > 3 {
+		log.Printf("debug: gluttony: wanted=%d\n", wantedSlices)
 		gluttony(w)
 		return
 	}
@@ -354,6 +367,7 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 		}
 
 		if numPurchases+wantedSlices > 3 {
+			log.Printf("debug: gluttony: wanted=%d, numPurchasedExisting=%d\n\n", wantedSlices, numPurchases)
 			gluttony(w)
 			return
 		}
@@ -373,6 +387,7 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 	}
 
 	if wantedSlices > remainingSlices {
+		log.Printf("debug: gone: remaining=%d, wanted=%d\n", remainingSlices, wantedSlices)
 		gone(w, "not enough remaining slices")
 		return
 	}
@@ -384,7 +399,8 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 		return
 	}
 
-	if pricePerSlice*float64(wantedSlices) != amount {
+	if int(pricePerSlice*float64(wantedSlices)*100) != int(amount*100) {
+		log.Printf("debug: wrong math: amount=%f, calculated=%f\n", amount, pricePerSlice*float64(wantedSlices))
 		wrongMaths(w)
 		return
 	}
@@ -476,6 +492,8 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 		_, err = conn.Do("EXEC")
 		if err == nil {
+			log.Printf("debug: success purchase: user=%q, wanted=%d, remaining=%d, newRemaining=%d\n",
+				username, wantedSlices, remainingSlices, remainingSlices-wantedSlices)
 			w.WriteHeader(http.StatusCreated)
 			return
 		}

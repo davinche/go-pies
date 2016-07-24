@@ -50,7 +50,7 @@ const list = `
 		</p>
 
 		<p>
-			<strong>Price:</strong> {{.Price}}
+			<strong>Price:</strong> ${{.Price | printf "%0.2f"}}
 		</p>
 
 		<p>
@@ -106,7 +106,7 @@ const single = `
 		</p>
 
 		<p>
-			<strong>Price:</strong> {{.Price}}
+			<strong>Price:</strong> ${{.Price | printf "%0.2f"}}
 		</p>
 
 		<p>

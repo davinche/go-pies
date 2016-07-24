@@ -9,30 +9,38 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/kardianos/osext"
+
 	"github.com/davinche/gpies/api"
+	"github.com/davinche/gpies/config"
 	"github.com/davinche/gpies/pie"
 	"github.com/garyburd/redigo/redis"
 )
 
-const s3URL string = "http://stash.truex.com/tech/bakeoff/pies.json"
-const piesJSON string = "./pies.json"
-
 // FromURL ingests data into redis via the data from the s3 bucket
-func FromURL() {
-	resp, err := http.Get(s3URL)
+func FromURL(url string) {
+	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatalf("error: could not ingest from pies.json: err=%q\n", err)
 	}
-
 	ingest(resp.Body)
 }
 
 // FromFile ingests data from the pies.json file from disk.
 // Pies.json was obtained from the link in the bakeoff.
 func FromFile() {
+
+	execDir, err := osext.ExecutableFolder()
+
+	if err != nil {
+		log.Fatalf("error: could not determine path for pies.json: err=%q\n", err)
+	}
+
+	piesJSON := execDir + "/pies.json"
+
 	file, err := os.Open(piesJSON)
 	if err != nil {
-		log.Fatalf("error: could not ingest from pies.json: err=%q\n", err)
+		log.Fatalf("error: could not ingest pies.json: err=%q\n", err)
 	}
 	ingest(file)
 }
@@ -52,9 +60,15 @@ func ingest(r io.ReadCloser) {
 	}
 
 	// Connect to redis
-	conn, err := redis.Dial("tcp", ":6379")
+	conn, err := redis.Dial("tcp", config.Config.Redis)
 	if err != nil {
 		log.Fatalf("error: could not connect to redis: err=%q\n", err)
+	}
+
+	// Flush Redis
+	_, err = conn.Do("flushall")
+	if err != nil {
+		log.Fatalf("error: could not flush redis: err=%q\n", err)
 	}
 
 	// Create the pies
