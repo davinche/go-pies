@@ -38,7 +38,7 @@ const list = `
 	</style>
 </head>
 <body>
-	<h1>Pies - Go have a taste heaven</h1>
+	<h1>Pies - Go have a taste of heaven</h1>
 	{{range $index, $pie := .}}
 	<div>
 		<p>
