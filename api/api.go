@@ -101,9 +101,7 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	log.Printf("debug: pieKey=%q, slicesKey=%q, purchasersKey=%q\n", key, slicesKey, piePurchasersKey)
 
 	// Pie to eventually serialize
-	p := pie.Pie{}
 	details := pie.Details{
-		Pie:       &p,
 		Purchases: []*pie.Purchases{},
 	}
 
@@ -125,7 +123,7 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	}
 
 	// Unmarshall into pie object
-	err = json.Unmarshal(pieBytes, &p)
+	err = json.Unmarshal(pieBytes, &details)
 	if err != nil {
 		redisError(w, err)
 		return
@@ -165,7 +163,7 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	}
 
 	// serializes
-	p.Slices = 0
+	details.Pie.Slices = 0
 	details.RemainingSlices = slices
 
 	// showing json? Or rendering template
