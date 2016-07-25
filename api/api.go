@@ -276,7 +276,7 @@ func getPurchaseParams(r *http.Request) (username string, amount float64, slices
 	slicesStr := r.PostFormValue("slices")
 
 	// make sure all data is there
-	if username == "" || amountStr == "" || slicesStr == "" {
+	if username == "" || amountStr == "" {
 		errorFmt := "error: missing information: %s"
 		if username == "" {
 			errors = append(errors, fmt.Sprintf(errorFmt, "missing username"))
@@ -286,10 +286,11 @@ func getPurchaseParams(r *http.Request) (username string, amount float64, slices
 			errors = append(errors, fmt.Sprintf(errorFmt, "missing amount"))
 		}
 
-		if slicesStr == "" {
-			errors = append(errors, fmt.Sprintf(errorFmt, "missing slices"))
-		}
 		return "", 0, 0, errors
+	}
+
+	if slicesStr == "" {
+		slicesStr = "1"
 	}
 
 	amount, err := strconv.ParseFloat(amountStr, 64)
