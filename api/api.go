@@ -575,6 +575,7 @@ func encodeJSON(w http.ResponseWriter, data interface{}, statusCode interface{})
 	if statusCode != nil {
 		code = statusCode.(int)
 	}
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(code)
 	encoder := json.NewEncoder(w)
 	encoder.Encode(data)
@@ -584,6 +585,7 @@ func encodeJSON(w http.ResponseWriter, data interface{}, statusCode interface{})
 // serializes into an errors JSON response while setting the http status code
 // to 500 (internal status errorr)
 func encodeError(w http.ResponseWriter, msg string) {
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
 	errors := errorsResponse{[]string{msg}}
 	encoder := json.NewEncoder(w)
@@ -593,6 +595,7 @@ func encodeError(w http.ResponseWriter, msg string) {
 // encodeBadRequest is a helper function that takes in an array of error
 // messages and returns a BadRequest response with the list of errors
 func encodeBadRequest(w http.ResponseWriter, msgs ...string) {
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	errors := errorsResponse{msgs}
 	encoder := json.NewEncoder(w)
