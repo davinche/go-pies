@@ -413,29 +413,14 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 	// 3. If all goes well, update
 	// ------------------------------------------------------------------------
 	userAvailableKey := fmt.Sprintf(UserAvailableKey, username)
+	userUnavailableKey := fmt.Sprintf(UserUnavailableKey, username)
 	var transactionError error
 	for i := 0; i < 5; i++ {
 		// TODO: sleep maybe for exponential backoff?
-		_, err := conn.Do("WATCH", slicesKey, piePurchasersKey, purchasesKey, UserAvailableKey, PiesAvailableKey)
+		_, err := conn.Do("WATCH", slicesKey, piePurchasersKey, purchasesKey, userAvailableKey, PiesAvailableKey)
 		if err != nil {
 			transactionError = err
 			continue
-		}
-
-		// Create or Update the list of pies available to the user
-		existingUser, err := redis.Bool(conn.Do("EXISTS", userAvailableKey))
-		if err != nil {
-			transactionError = err
-			continue
-		}
-
-		if !existingUser {
-			// grab all available pies
-			_, err := conn.Do("SDIFFSTORE", userAvailableKey, PiesAvailableKey)
-			if err != nil {
-				transactionError = err
-				continue
-			}
 		}
 
 		remainingSlices, err := redis.Int(conn.Do("GET", slicesKey))
@@ -487,11 +472,17 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 		// Check to see if the user can still buy more
 		if (purchasedSlices + wantedSlices) == 3 {
-			conn.Send("SREM", userAvailableKey, pieID)
+			conn.Send("SADD", userUnavailableKey, pieID)
+			conn.Send("SDIFFSTORE", userAvailableKey, PiesAvailableKey, userUnavailableKey)
 		}
 
-		_, err = conn.Do("EXEC")
-		if err == nil {
+		reply, err := conn.Do("EXEC")
+		if err != nil {
+			transactionError = err
+			continue
+		}
+
+		if reply != nil {
 			log.Printf("debug: success purchase: user=%q, wanted=%d, remaining=%d, newRemaining=%d\n",
 				username, wantedSlices, remainingSlices, remainingSlices-wantedSlices)
 			w.WriteHeader(http.StatusCreated)

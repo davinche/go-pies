@@ -35,3 +35,8 @@ const PurchaseKey = "pie:%s:user:%s"
 // UserAvailableKey is the formatted string that represents the key to the
 // number of remaining pies available to the user
 const UserAvailableKey = "user:%s:available"
+
+// UserUnavailableKey is the formatted string that represents the key to the
+// number of remaining pies that are no longer available to the user due to
+// max consumption of slices (3)
+const UserUnavailableKey = "user:%s:unavailable"
