@@ -293,9 +293,9 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 // required data is provided
 func getPurchaseParams(r *http.Request) (username string, amount float64, slices int, errors []string) {
 	// Get purchase information
-	username = r.PostFormValue("username")
-	amountStr := r.PostFormValue("amount")
-	slicesStr := r.PostFormValue("slices")
+	username = r.URL.Query().Get("username")
+	amountStr := r.URL.Query().Get("amount")
+	slicesStr := r.URL.Query().Get("slices")
 
 	// make sure all data is there
 	if username == "" || amountStr == "" {
