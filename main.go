@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"io/ioutil"
 	"log"
 	"net/http"
 
@@ -13,7 +14,13 @@ import (
 func main() {
 	shouldIngest := flag.Bool("i", false, "Ingestion: specify this boolean to repopulate Redis")
 	ingestURL := flag.String("s", "", "Ingestion URL: specify the URL that contains the JSON to be ingested")
+	verbose := flag.Bool("v", false, "Verbose: specify to enable logging")
 	flag.Parse()
+
+	if !*verbose {
+		log.SetFlags(0)
+		log.SetOutput(ioutil.Discard)
+	}
 
 	if *shouldIngest {
 		if *ingestURL != "" {
