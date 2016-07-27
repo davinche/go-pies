@@ -83,6 +83,7 @@ func ingest(r io.ReadCloser) {
 
 // createPies creates a hash entry for each
 func createPies(conn redis.Conn, pies pie.Pies) error {
+	defer conn.Close()
 
 	// Serialize all the pies as json
 	piesSerialized, err := json.Marshal(pies)

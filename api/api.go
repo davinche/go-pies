@@ -21,6 +21,8 @@ var pool *redis.Pool
 // Create a redis pool connection on API init
 func init() {
 	pool = &redis.Pool{
+		MaxIdle:   80,
+		MaxActive: 12000,
 		Dial: func() (redis.Conn, error) {
 			redisOpts := []redis.DialOption{}
 			if config.Config.RedisPassword != "" {
@@ -48,6 +50,7 @@ func Handle(prefix string, r *httptreemux.TreeMux) {
 // getPies returns the list of all pies
 func getPies(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 	conn := pool.Get()
+	defer conn.Close()
 
 	// Get all the pies
 	piesBytes, err := redis.Bytes(conn.Do("GET", PiesJSONKey))
@@ -177,6 +180,7 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 // getRecommended gets a recommended pie for a given user
 func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 	conn := pool.Get()
+	defer conn.Close()
 
 	// Get the from data
 	username := r.FormValue("username")
