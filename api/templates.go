@@ -1,9 +1,6 @@
 package api
 
-import (
-	"html/template"
-	"log"
-)
+import "html/template"
 
 const list = `
 <!DOCTYPE html>
@@ -127,23 +124,7 @@ const single = `
 `
 
 // PiesList is the template for showing a list of pies
-var PiesList *template.Template
+var PiesList = template.Must(template.New("PiesList").Parse(list))
 
 // PiesSingle is the template for showing a specific pie
-var PiesSingle *template.Template
-
-func init() {
-	var err error
-	PiesList, err = template.New("PiesList").Parse(list)
-
-	if err != nil {
-		log.Fatalf("error: could not parse template: err=%q\n", err)
-	}
-
-	PiesSingle, err = template.New("PiesList").Parse(single)
-
-	if err != nil {
-		log.Fatalf("error: could not parse template: err=%q\n", err)
-	}
-
-}
+var PiesSingle = template.Must(template.New("PiesList").Parse(single))
