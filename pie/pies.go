@@ -11,20 +11,29 @@ type Pie struct {
 	Permalink string   `json:"permalink,omitempty"`
 }
 
-// Pies is a list of pies which implement the sort interface
-// to enable sorting by Price
+// RecommendPie is the struct used for recommending a pie
+type RecommendPie struct {
+	ID    uint64  `json:"id"`
+	Price float64 `json:"price_per_slice"`
+}
+
+// Pies is a list of pies
 type Pies []*Pie
 
-func (p Pies) Len() int {
-	return len(p)
+// RecommendPies only holds the necessary to serialize for the recommend endpoint.
+// Implements the sort interface to sort by budget.
+type RecommendPies []*RecommendPie
+
+func (r RecommendPies) Len() int {
+	return len(r)
 }
 
-func (p Pies) Less(i, j int) bool {
-	return p[i].Price < p[j].Price
+func (r RecommendPies) Less(i, j int) bool {
+	return r[i].Price < r[j].Price
 }
 
-func (p Pies) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
+func (r RecommendPies) Swap(i, j int) {
+	r[i], r[j] = r[j], r[i]
 }
 
 // Purchases contains information about a particualar user as well as

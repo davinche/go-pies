@@ -22,7 +22,7 @@ var pool *redis.Pool
 func init() {
 	pool = &redis.Pool{
 		MaxIdle:   80,
-		MaxActive: 12000,
+		MaxActive: 1000,
 		Dial: func() (redis.Conn, error) {
 			redisOpts := []redis.DialOption{}
 			if config.Config.RedisPassword != "" {
@@ -238,27 +238,39 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 	}
 
 	// Get all the pies to recommend
-	listOfPies := pie.Pies{}
+	listOfPies := make(pie.RecommendPies, len(recommendedPieIDs))
 
 	// Get the pie details
-	for _, id := range recommendedPieIDs {
-		pKey := fmt.Sprintf(PieKey, id)
-		pBytes, err := redis.Bytes(conn.Do("GET", pKey))
+	for index, id := range recommendedPieIDs {
+		pKey := fmt.Sprintf(HPieKey, id)
+		values, err := redis.Values(conn.Do("HMGET", pKey, "id", "price"))
 		if err != nil {
 			redisError(w, err)
 			return
 		}
 
-		pieObj := pie.Pie{}
-		err = json.Unmarshal(pBytes, &pieObj)
+		id, err := redis.Uint64(values[0], nil)
 		if err != nil {
-			errMsg := fmt.Sprintf("error: could not unmarshal json: err=%q", err)
+			errMsg := fmt.Sprintf("error: could not get pie id: err=%q", err)
 			log.Println(errMsg)
 			encodeError(w, errMsg)
 			return
 		}
 
-		listOfPies = append(listOfPies, &pieObj)
+		price, err := redis.Float64(values[1], nil)
+		if err != nil {
+			errMsg := fmt.Sprintf("error: could not get pie price: err=%q", err)
+			log.Println(errMsg)
+			encodeError(w, errMsg)
+			return
+		}
+
+		pieObj := &pie.RecommendPie{
+			ID:    id,
+			Price: price,
+		}
+
+		listOfPies[index] = pieObj
 	}
 
 	// Sort by budget
@@ -534,7 +546,7 @@ func wrongMaths(w http.ResponseWriter) {
 	encoder.Encode(err)
 }
 
-func recommend(w http.ResponseWriter, r *http.Request, p *pie.Pie) {
+func recommend(w http.ResponseWriter, r *http.Request, p *pie.RecommendPie) {
 	encoder := json.NewEncoder(w)
 	resp := struct {
 		PieURL string `json:"pie_url"`
