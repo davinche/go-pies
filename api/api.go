@@ -17,6 +17,7 @@ import (
 
 // Redis Connection Pool
 var pool *redis.Pool
+var hw = []byte("Hello, World!")
 
 // Create a redis pool connection on API init
 func init() {
@@ -41,10 +42,15 @@ func init() {
 // functions that will handle the API requests
 func Handle(prefix string, r *httptreemux.TreeMux) {
 	api := r.NewGroup(prefix)
+	api.GET("/hello_world", helloWorld)
 	api.GET("/pies", getPies)
 	api.GET("/pies/:id", getPie)
 	api.GET("/pies/recommend", getRecommended)
 	api.POST("/pies/:id/purchases", purchasePie)
+}
+
+func helloWorld(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	w.Write(hw)
 }
 
 // getPies returns the list of all pies
