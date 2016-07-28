@@ -249,14 +249,8 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 
 	// Get the pie details
 	for index, id := range recommendedPieIDs {
-		pKey := fmt.Sprintf(HPieKey, id)
-		values, err := redis.Values(conn.Do("HMGET", pKey, "id", "price"))
-		if err != nil {
-			redisError(w, err)
-			return
-		}
-
-		id, err := redis.Uint64(values[0], nil)
+		idStr, err := redis.String(id, nil)
+		id, err := redis.Uint64(id, nil)
 		if err != nil {
 			errMsg := fmt.Sprintf("error: could not get pie id: err=%q", err)
 			log.Println(errMsg)
@@ -264,17 +258,9 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 			return
 		}
 
-		price, err := redis.Float64(values[1], nil)
-		if err != nil {
-			errMsg := fmt.Sprintf("error: could not get pie price: err=%q", err)
-			log.Println(errMsg)
-			encodeError(w, errMsg)
-			return
-		}
-
 		pieObj := &pie.RecommendPie{
 			ID:    id,
-			Price: price,
+			Price: pieMap[idStr].Price,
 		}
 
 		listOfPies[index] = pieObj
@@ -341,7 +327,6 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 	pieID := params["id"]
 	key := fmt.Sprintf(PieKey, pieID)
-	hkey := fmt.Sprintf(HPieKey, pieID)
 	slicesKey := fmt.Sprintf(PieSlicesKey, pieID)
 	piePurchasersKey := fmt.Sprintf(PiePurchasersKey, pieID)
 
@@ -369,6 +354,14 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 	if wantedSlices > 3 {
 		log.Printf("debug: gluttony: wanted=%d\n", wantedSlices)
 		gluttony(w)
+		return
+	}
+
+	// Check the maths
+	pricePerSlice := int(pieMap[pieID].Price * 100)
+	if pricePerSlice*wantedSlices != int(amount*100) {
+		log.Printf("debug: wrong math: amount=%f, calculated=%f\n", amount, float64(pricePerSlice*wantedSlices)/100)
+		wrongMaths(w)
 		return
 	}
 
@@ -416,19 +409,6 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 		return
 	}
 
-	// Check the maths
-	pricePerSlice, err := redis.Float64(conn.Do("HGET", hkey, "price"))
-	if err != nil {
-		redisError(w, err)
-		return
-	}
-
-	if int(pricePerSlice*float64(wantedSlices)*100) != int(amount*100) {
-		log.Printf("debug: wrong math: amount=%f, calculated=%f\n", amount, pricePerSlice*float64(wantedSlices))
-		wrongMaths(w)
-		return
-	}
-
 	// ------------------------------------------------------------------------
 	// Attempt to PURCHASE
 	// ------------------------------------------------------------------------
@@ -471,14 +451,12 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 		// Make sure we are within our limit
 		if (purchasedSlices + wantedSlices) > 3 {
-			conn.Do("UNWATCH")
 			gluttony(w)
 			return
 		}
 
 		// Make sure we actually have enough slices
 		if remainingSlices < wantedSlices {
-			conn.Do("UNWATCH")
 			gone(w, nil)
 			return
 		}
