@@ -44,9 +44,9 @@ func Handle(prefix string, r *httptreemux.TreeMux) {
 	api := r.NewGroup(prefix)
 	api.GET("/hello_world", helloWorld)
 	api.GET("/pies", getPies)
-	api.GET("/pies/:id", getPie)
+	api.GET("/pie/:id", getPie)
 	api.GET("/pies/recommend", getRecommended)
-	api.POST("/pies/:id/purchases", purchasePie)
+	api.POST("/pie/:id/purchases", purchasePie)
 }
 
 func helloWorld(w http.ResponseWriter, r *http.Request, _ map[string]string) {
@@ -282,7 +282,9 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 	// Sort by budget
 	if budget == "cheap" {
 		sort.Sort(listOfPies)
-	} else {
+	}
+
+	if budget == "premium" {
 		sort.Sort(sort.Reverse(listOfPies))
 	}
 
