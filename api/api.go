@@ -65,7 +65,11 @@ func Handle(prefix string, r *httptreemux.TreeMux) {
 
 	// Save the pies in a map
 	for _, p := range pieList {
-		pieMap[strconv.FormatUint(p.ID, 10)] = p
+		// Create a new pie that is different than the pie in pieList
+		pt := pie.Pie{}
+		// Copy the values of the pie in pielist into this new pie
+		pt = *p
+		pieMap[strconv.FormatUint(p.ID, 10)] = &pt
 	}
 
 	// init the routes
@@ -121,8 +125,10 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	log.Printf("debug: pieKey=%q, slicesKey=%q, purchasersKey=%q\n", key, slicesKey, piePurchasersKey)
 
 	// Pie to eventually serialize
+	pt := pie.Pie{}
+	pt = *pieMap[pieID]
 	details := pie.Details{
-		Pie:       pieMap[pieID],
+		Pie:       &pt,
 		Purchases: []*pie.Purchases{},
 	}
 
