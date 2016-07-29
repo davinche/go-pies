@@ -86,7 +86,7 @@ func getPies(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 			return
 		}
 		p.Slices = slices
-		p.Permalink = "http://" + r.Host + "/pies/" + strconv.FormatUint(p.ID, 10)
+		p.Permalink = "http://" + r.Host + "/pie/" + strconv.FormatUint(p.ID, 10)
 	}
 
 	PiesList.Execute(w, pies)
