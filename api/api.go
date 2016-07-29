@@ -17,7 +17,11 @@ import (
 
 // Redis Connection Pool
 var pool *redis.Pool
+
+// Cached Stuff
 var hw = []byte("Hello, World!")
+var pieMap map[string]*pie.Pie
+var pieList pie.Pies
 
 // Create a redis pool connection on API init
 func init() {
@@ -41,6 +45,34 @@ func init() {
 // Handle takes a prefix (the prefix route for the API) and registers
 // functions that will handle the API requests
 func Handle(prefix string, r *httptreemux.TreeMux) {
+
+	conn := pool.Get()
+	defer conn.Close()
+
+	pieMap = make(map[string]*pie.Pie)
+	pieList = make(pie.Pies, 0)
+
+	piesBytes, err := redis.Bytes(conn.Do("GET", PiesJSONKey))
+	if err != nil {
+		log.Fatalf("error: could not get pies from Redis: err=%q\n", err)
+	}
+
+	// Unmarshall
+	err = json.Unmarshal(piesBytes, &pieList)
+	if err != nil {
+		log.Fatalf("error: could not unmarshall pies: err=%q\n", err)
+	}
+
+	// Save the pies in a map
+	for _, p := range pieList {
+		// Create a new pie that is different than the pie in pieList
+		pt := pie.Pie{}
+		// Copy the values of the pie in pielist into this new pie
+		pt = *p
+		pieMap[strconv.FormatUint(p.ID, 10)] = &pt
+	}
+
+	// init the routes
 	api := r.NewGroup(prefix)
 	api.GET("/hello_world", helloWorld)
 	api.GET("/pies", getPies)
@@ -58,25 +90,7 @@ func getPies(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 	conn := pool.Get()
 	defer conn.Close()
 
-	// Get all the pies
-	piesBytes, err := redis.Bytes(conn.Do("GET", PiesJSONKey))
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("error: could not get pies from Redis: err=%q\n", err)
-		return
-	}
-
-	// Unmarshall
-	pies := pie.Pies{}
-	err = json.Unmarshal(piesBytes, &pies)
-
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("error: could not unmarshall pies: err=%q\n", err)
-		return
-	}
-
-	for _, p := range pies {
+	for _, p := range pieList {
 		// Grab remainig slices for the pie
 		slicesKey := fmt.Sprintf(PieSlicesKey, strconv.FormatUint(p.ID, 10))
 		slices, err := redis.Int(conn.Do("GET", slicesKey))
@@ -89,7 +103,8 @@ func getPies(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		p.Permalink = "http://" + r.Host + "/pie/" + strconv.FormatUint(p.ID, 10)
 	}
 
-	PiesList.Execute(w, pies)
+	// Render the template
+	PiesList.Execute(w, pieList)
 }
 
 // getPie returns the information for a single pie
@@ -110,12 +125,14 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 	log.Printf("debug: pieKey=%q, slicesKey=%q, purchasersKey=%q\n", key, slicesKey, piePurchasersKey)
 
 	// Pie to eventually serialize
+	pt := pie.Pie{}
+	pt = *pieMap[pieID]
 	details := pie.Details{
+		Pie:       &pt,
 		Purchases: []*pie.Purchases{},
 	}
 
 	conn.Send("MULTI")
-	conn.Send("GET", key)
 	conn.Send("GET", slicesKey)
 	conn.Send("SMEMBERS", piePurchasersKey)
 	resp, err := redis.Values(conn.Do("EXEC"))
@@ -124,36 +141,26 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 		return
 	}
 
-	// Get the pie data from redis
-	pieBytes, err := redis.Bytes(resp[0], nil)
-	if err != nil {
-		redisError(w, err)
-		return
-	}
-
-	// Unmarshall into pie object
-	err = json.Unmarshal(pieBytes, &details)
-	if err != nil {
-		redisError(w, err)
-		return
-	}
-
 	// Get the number of slices
-	slices, err := redis.Int(resp[1], nil)
+	slices, err := redis.Int(resp[0], nil)
 	if err != nil {
 		redisError(w, err)
 		return
 	}
 
 	// get purchaser IDs
-	members, err := redis.Values(resp[2], nil)
+	members, err := redis.Values(resp[1], nil)
 	if err != nil {
 		redisError(w, err)
 		return
 	}
 
+	if len(members) > 0 {
+		details.Purchases = make([]*pie.Purchases, len(members))
+	}
+
 	// Get number of slices by each purchaser
-	for _, member := range members {
+	for index, member := range members {
 		memberName, err := redis.String(member, nil)
 		if err != nil {
 			redisError(w, err)
@@ -165,10 +172,10 @@ func getPie(w http.ResponseWriter, r *http.Request, params map[string]string) {
 			redisError(w, err)
 			return
 		}
-		details.Purchases = append(details.Purchases, &pie.Purchases{
+		details.Purchases[index] = &pie.Purchases{
 			Username: memberName,
 			Slices:   numSlices,
-		})
+		}
 	}
 
 	// serializes
@@ -248,14 +255,8 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 
 	// Get the pie details
 	for index, id := range recommendedPieIDs {
-		pKey := fmt.Sprintf(HPieKey, id)
-		values, err := redis.Values(conn.Do("HMGET", pKey, "id", "price"))
-		if err != nil {
-			redisError(w, err)
-			return
-		}
-
-		id, err := redis.Uint64(values[0], nil)
+		idStr, err := redis.String(id, nil)
+		id, err := redis.Uint64(id, nil)
 		if err != nil {
 			errMsg := fmt.Sprintf("error: could not get pie id: err=%q", err)
 			log.Println(errMsg)
@@ -263,17 +264,9 @@ func getRecommended(w http.ResponseWriter, r *http.Request, _ map[string]string)
 			return
 		}
 
-		price, err := redis.Float64(values[1], nil)
-		if err != nil {
-			errMsg := fmt.Sprintf("error: could not get pie price: err=%q", err)
-			log.Println(errMsg)
-			encodeError(w, errMsg)
-			return
-		}
-
 		pieObj := &pie.RecommendPie{
 			ID:    id,
-			Price: price,
+			Price: pieMap[idStr].Price,
 		}
 
 		listOfPies[index] = pieObj
@@ -340,7 +333,6 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 	pieID := params["id"]
 	key := fmt.Sprintf(PieKey, pieID)
-	hkey := fmt.Sprintf(HPieKey, pieID)
 	slicesKey := fmt.Sprintf(PieSlicesKey, pieID)
 	piePurchasersKey := fmt.Sprintf(PiePurchasersKey, pieID)
 
@@ -368,6 +360,14 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 	if wantedSlices > 3 {
 		log.Printf("debug: gluttony: wanted=%d\n", wantedSlices)
 		gluttony(w)
+		return
+	}
+
+	// Check the maths
+	pricePerSlice := int(pieMap[pieID].Price * 100)
+	if pricePerSlice*wantedSlices != int(amount*100) {
+		log.Printf("debug: wrong math: amount=%f, calculated=%f\n", amount, float64(pricePerSlice*wantedSlices)/100)
+		wrongMaths(w)
 		return
 	}
 
@@ -415,19 +415,6 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 		return
 	}
 
-	// Check the maths
-	pricePerSlice, err := redis.Float64(conn.Do("HGET", hkey, "price"))
-	if err != nil {
-		redisError(w, err)
-		return
-	}
-
-	if int(pricePerSlice*float64(wantedSlices)*100) != int(amount*100) {
-		log.Printf("debug: wrong math: amount=%f, calculated=%f\n", amount, pricePerSlice*float64(wantedSlices))
-		wrongMaths(w)
-		return
-	}
-
 	// ------------------------------------------------------------------------
 	// Attempt to PURCHASE
 	// ------------------------------------------------------------------------
@@ -470,14 +457,12 @@ func purchasePie(w http.ResponseWriter, r *http.Request, params map[string]strin
 
 		// Make sure we are within our limit
 		if (purchasedSlices + wantedSlices) > 3 {
-			conn.Do("UNWATCH")
 			gluttony(w)
 			return
 		}
 
 		// Make sure we actually have enough slices
 		if remainingSlices < wantedSlices {
-			conn.Do("UNWATCH")
 			gone(w, nil)
 			return
 		}
